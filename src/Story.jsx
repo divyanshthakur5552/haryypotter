@@ -1,7 +1,31 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo, useMemo, useCallback } from "react";
 import Navbar from "./components/Navbar";
-import ObjScene from "./components/ThreeD";
-const video = [
+
+// Dynamically import 3D component to isolate errors
+const ThreeD = memo(function ThreeDWrapper() {
+  const [Component, setComponent] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    
+    import("./components/ThreeD")
+      .then((mod) => {
+        if (mounted) setComponent(() => mod.default);
+      })
+      .catch(() => {
+        if (mounted) setError(true);
+      });
+
+    return () => { mounted = false; };
+  }, []);
+
+  if (error || !Component) return null;
+  
+  return <Component />;
+});
+
+const videos = [
   "/Harry video/intro.mp4",
   "/Harry video/fight.mp4",
   "/Harry video/fight1.mp4",
@@ -9,7 +33,8 @@ const video = [
   "/Harry video/last.mp4",
   "/Harry video/scret.mp4",
   "/Harry video/vold.mp4",
-]
+];
+
 const hpTexts = [
   "Expecto Patronum",
   "The Boy Who Lived",
@@ -18,166 +43,184 @@ const hpTexts = [
   "Hogwarts",
   "Gryffindor",
   "Lumos",
-  "Nox",
-  "Wingardium Leviosa",
-  "Dumbledore's Army",
-  "Order of the Phoenix",
-  "Deathly Hallows",
 ];
-const textBySrc = Object.fromEntries(
-  video.map((src) => [src, hpTexts[Math.floor(Math.random() * hpTexts.length)]])
-);
+
+const textBySrc = Object.fromEntries(videos.map((src, i) => [src, hpTexts[i % hpTexts.length]]));
+
+const LazyVideo = memo(({ src, className }) => {
+  const videoRef = useRef(null);
+  const containerRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "100px", threshold: 0.1 }
+    );
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} className={className}>
+      {isVisible && (
+        <video
+          ref={videoRef}
+          src={src}
+          className="w-full h-full object-cover"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="none"
+        />
+      )}
+    </div>
+  );
+});
+
+const VideoCard = memo(({ src, gridClass }) => (
+  <div className={`relative overflow-hidden rounded-xl bg-zinc-900/40 border border-white/10 ${gridClass}`}>
+    <LazyVideo src={src} className="w-full h-full" />
+    <div className="absolute inset-0 pointer-events-none z-10 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+    <div className="absolute bottom-3 left-3 z-20 bg-black/40 px-3 py-1 rounded-md backdrop-blur-sm">
+      <span className="text-amber-100 text-sm md:text-base font-semibold tracking-wide">{textBySrc[src]}</span>
+    </div>
+  </div>
+));
+
+const gridClasses1 = [
+  "col-span-2 md:col-span-3 row-span-2",
+  "col-span-2 md:col-span-3 row-span-1",
+  "col-span-1 md:col-span-2 row-span-1",
+  "col-span-1 md:col-span-1 row-span-1",
+];
+
+const gridClasses2 = [
+  "col-span-2 md:col-span-4 row-span-2",
+  "col-span-2 md:col-span-2 row-span-1",
+  "col-span-2 md:col-span-2 row-span-1",
+];
+
 function Story() {
   const audioRef = useRef(null);
   const [needsUnmute, setNeedsUnmute] = useState(true);
+  const [show3D, setShow3D] = useState(false);
 
-  const handleEnableSound = async () => {
+  // Delay 3D render to avoid blocking initial paint
+  useEffect(() => {
+    const timer = setTimeout(() => setShow3D(true), 200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleEnableSound = useCallback(async () => {
     const el = audioRef.current;
     if (!el) return;
     try {
       el.muted = false;
       el.volume = 0.7;
       await el.play();
+      setNeedsUnmute(false);
     } catch {}
-  };
+  }, []);
+
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
     el.muted = true;
     el.play().catch(() => {});
-    const tryUnmutePlay = async () => {
-      try {
-        await handleEnableSound();
-      } catch {}
-    };
-    const onPlaying = () => setNeedsUnmute(el.muted);
-    const onInteract = () => {
-      tryUnmutePlay();
-      window.removeEventListener('click', onInteract);
-      window.removeEventListener('touchstart', onInteract);
-      window.removeEventListener('keydown', onInteract);
-    };
-    window.addEventListener('click', onInteract);
-    window.addEventListener('touchstart', onInteract);
-    window.addEventListener('keydown', onInteract);
-    el.addEventListener('playing', onPlaying);
-    return () => {
-      window.removeEventListener('click', onInteract);
-      window.removeEventListener('touchstart', onInteract);
-      window.removeEventListener('keydown', onInteract);
-      el.removeEventListener('playing', onPlaying);
-    };
-  }, []);
-  return ( <>
-    <div className="min-h-screen w-full relative bg-cover bg-no-repeat bg-center bg-[url('/sky.png')] text-white">
-      <img src="/bg.png" alt="" className="absolute inset-0 w-full h-full object-cover z-0" />
-      <Navbar/>
-      <div className="w-full h-screen relative z-10">
-        <ObjScene />
-      </div>
-      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center max-w-3xl px-6">
-        <h1 className="text-8xl font-bold">Harry Potter</h1>
-        <p className="mt-6 text-lg md:text-xl leading-relaxed text-gray-200">
-          Harry Potter follows a young wizard who discovers his magical heritage on his eleventh birthday and
-          attends Hogwarts School of Witchcraft and Wizardry. Alongside his friends, he faces daunting challenges,
-          unravels mysteries about his past, and confronts the dark wizard Lord Voldemort whose return threatens
-          both the wizarding and Muggle worlds.
-        </p>
-      </div>
-    </div>
-    <div className="min-h-screen w-full relative bg-black text-white">
-      <div className="max-w-7xl mx-auto px-6 py-16">
-        <div className="grid gap-4 grid-cols-2 md:grid-cols-6 auto-rows-[160px] md:auto-rows-[200px]">
-          {video.slice(0, 4).map((src, i) => (
-            <div
-              key={src}
-              className={
-                `relative overflow-hidden rounded-xl bg-zinc-900/40 border border-white/10 ` +
-                (i === 0
-                  ? "col-span-2 md:col-span-3 row-span-2"
-                  : i === 1
-                  ? "col-span-2 md:col-span-3 row-span-1"
-                  : i === 2
-                  ? "col-span-1 md:col-span-2 row-span-1"
-                  : "col-span-1 md:col-span-1 row-span-1")
-              }
-            >
-              <video
-                src={src}
-                className="w-full h-full object-cover"
-                autoPlay
-                muted
-                loop
-                playsInline
-              />
-              <div className="absolute inset-0 pointer-events-none z-10 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-              <div className="absolute bottom-3 left-3 z-20 bg-black/40 px-3 py-1 rounded-md backdrop-blur-sm">
-                <span className="text-amber-100 text-sm md:text-base font-semibold tracking-wide font-sans not-italic">
-                  {textBySrc[src]}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
 
-        <div className="mt-16 grid gap-4 grid-cols-2 md:grid-cols-6 auto-rows-[160px] md:auto-rows-[200px]">
-          {video.slice(4).map((src, i) => (
-            <div
-              key={src}
-              className={
-                `relative overflow-hidden rounded-xl bg-zinc-900/40 border border-white/10 ` +
-                (i === 0
-                  ? "col-span-2 md:col-span-4 row-span-2"
-                  : i === 1
-                  ? "col-span-2 md:col-span-2 row-span-1"
-                  : i === 2
-                  ? "col-span-2 md:col-span-2 row-span-1"
-                  : "col-span-2 md:col-span-3 row-span-1")
-              }
-            >
-              <video
-                src={src}
-                className="w-full h-full object-cover"
-                autoPlay
-                muted
-                loop
-                playsInline
-              />
-              <div className="absolute inset-0 pointer-events-none z-10 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-              <div className="absolute bottom-3 left-3 z-20 bg-black/40 px-3 py-1 rounded-md backdrop-blur-sm">
-                <span className="text-amber-100 text-sm md:text-base font-semibold tracking-wide font-sans not-italic">
-                  {textBySrc[src]}
-                </span>
-              </div>
-            </div>
-          ))}
+    const onInteract = () => {
+      handleEnableSound();
+      window.removeEventListener("click", onInteract);
+      window.removeEventListener("touchstart", onInteract);
+      window.removeEventListener("keydown", onInteract);
+    };
+
+    window.addEventListener("click", onInteract);
+    window.addEventListener("touchstart", onInteract);
+    window.addEventListener("keydown", onInteract);
+
+    return () => {
+      window.removeEventListener("click", onInteract);
+      window.removeEventListener("touchstart", onInteract);
+      window.removeEventListener("keydown", onInteract);
+    };
+  }, [handleEnableSound]);
+
+  const firstGrid = useMemo(() => 
+    videos.slice(0, 4).map((src, i) => (
+      <VideoCard key={src} src={src} gridClass={gridClasses1[i]} />
+    )), 
+  []);
+
+  const secondGrid = useMemo(() => 
+    videos.slice(4).map((src, i) => (
+      <VideoCard key={src} src={src} gridClass={gridClasses2[i]} />
+    )), 
+  []);
+
+  return (
+    <div className="bg-black min-h-screen">
+      {/* Hero Section */}
+      <div className="h-screen w-full relative text-white overflow-hidden">
+        <img src="/sky.png" alt="" className="absolute inset-0 w-full h-full object-cover z-0" />
+        <img src="/bg.png" alt="" className="absolute inset-0 w-full h-full object-cover z-[1]" />
+        <Navbar />
+        
+        {/* 3D Scene - loaded after delay */}
+        {show3D && (
+          <div className="absolute inset-0 z-[2]">
+            <ThreeD />
+          </div>
+        )}
+        
+        {/* Text overlay */}
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center max-w-3xl px-6 z-[3] pointer-events-none">
+          <h1 className="text-8xl font-bold drop-shadow-lg">Harry Potter</h1>
+          <p className="mt-6 text-lg md:text-xl leading-relaxed text-gray-200 drop-shadow-md">
+            Harry Potter follows a young wizard who discovers his magical heritage on his eleventh birthday and
+            attends Hogwarts School of Witchcraft and Wizardry. Alongside his friends, he faces daunting challenges,
+            unravels mysteries about his past, and confronts the dark wizard Lord Voldemort whose return threatens
+            both the wizarding and Muggle worlds.
+          </p>
         </div>
       </div>
+
+      {/* Video Grid Section */}
+      <div className="w-full bg-black text-white">
+        <div className="max-w-7xl mx-auto px-6 py-16">
+          <div className="grid gap-4 grid-cols-2 md:grid-cols-6 auto-rows-[160px] md:auto-rows-[200px]">
+            {firstGrid}
+          </div>
+          <div className="mt-16 grid gap-4 grid-cols-2 md:grid-cols-6 auto-rows-[160px] md:auto-rows-[200px]">
+            {secondGrid}
+          </div>
+        </div>
+      </div>
+
+      <audio ref={audioRef} src="/audio.mp3" autoPlay loop preload="auto" playsInline muted controls={false} className="hidden" aria-hidden="true" />
+      
+      {needsUnmute && (
+        <button
+          type="button"
+          onClick={handleEnableSound}
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold shadow-lg hover:bg-amber-400 active:bg-amber-600"
+        >
+          Enable sound
+        </button>
+      )}
     </div>
-    <audio
-      ref={audioRef}
-      src="/audio.mp3"
-      autoPlay
-      loop
-      preload="auto"
-      playsInline
-      muted
-      controls={false}
-      className="hidden"
-      aria-hidden="true"
-    />
-    {needsUnmute && (
-      <button
-        type="button"
-        onClick={handleEnableSound}
-        className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold shadow-lg hover:bg-amber-400 active:bg-amber-600"
-      >
-        Enable sound
-      </button>
-    )}
-    </>
-  )
+  );
 }
 
-export default Story
-
+export default Story;
